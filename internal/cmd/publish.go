@@ -2,10 +2,11 @@ package cmd
 
 import (
 	"context"
-	"github.com/danielmichaels/go-rabbit/internal/messaging"
-	"github.com/rabbitmq/amqp091-go"
 	"log/slog"
 	"time"
+
+	"github.com/danielmichaels/go-rabbit/internal/messaging"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 type Publish struct {

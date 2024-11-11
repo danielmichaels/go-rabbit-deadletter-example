@@ -3,13 +3,14 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"github.com/danielmichaels/go-rabbit/internal/messaging"
-	amqp "github.com/rabbitmq/amqp091-go"
-	"golang.org/x/sync/errgroup"
 	"log"
 	"log/slog"
 	"math/rand/v2"
 	"time"
+
+	"github.com/danielmichaels/go-rabbit/internal/messaging"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"golang.org/x/sync/errgroup"
 )
 
 type Consume struct {
@@ -48,17 +49,15 @@ func initCustomersQueues(client *messaging.RabbitClient) error {
 }
 
 func initDeadLetter(client *messaging.RabbitClient) error {
-	// Create the dead letter exchange
 	if err := client.CreateExchange("retry_customer_events", "direct",
 		true, false); err != nil {
 		slog.Error("error creating DLX exchange", "error", err)
 		return err
 	}
 
-	// Create the dead letter queue
 	args := amqp.Table{
 		"x-dead-letter-exchange":    "customer_events",
-		"x-dead-letter-routing-key": "customer_events",
+		"x-dead-letter-routing-key": "customers.created.au", // direct must match exactly
 		"x-message-ttl":             20000,
 	}
 	if err := client.CreateQueueWithArgs("retry_customer_events", true, false, args); err != nil {
@@ -66,7 +65,6 @@ func initDeadLetter(client *messaging.RabbitClient) error {
 		return err
 	}
 
-	// Bind the DLQ to the DLX
 	if err := client.CreateBinding("retry_customer_events", "retry_customer_events", "retry_customer_events"); err != nil {
 		slog.Error("error creating DLQ binding", "error", err)
 		return err
