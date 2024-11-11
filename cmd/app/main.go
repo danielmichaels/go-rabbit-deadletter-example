@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/danielmichaels/go-rabbit/internal/cmd"
 	"os"
+
+	"github.com/danielmichaels/go-rabbit/internal/cmd"
 
 	"github.com/alecthomas/kong"
 )
