@@ -15,10 +15,14 @@ type RabbitClient struct {
 	conn *amqp.Connection
 	// The channel that processes/sends Messages
 	ch             *amqp.Channel
-	reconnectDelay time.Duration
 	connectionInfo ConnectionInfo
 	isConnected    bool
 	done           chan bool
+
+	// reconnection settings
+	initialDelay  time.Duration
+	maxDelay      time.Duration
+	backoffFactor float64
 }
 
 type ConnectionInfo struct {
@@ -30,9 +34,11 @@ type ConnectionInfo struct {
 
 func NewRabbitClient(ci ConnectionInfo) (*RabbitClient, error) {
 	c := &RabbitClient{
-		reconnectDelay: 5 * time.Second,
 		connectionInfo: ci,
 		done:           make(chan bool),
+		initialDelay:   time.Second,
+		maxDelay:       5 * time.Minute,
+		backoffFactor:  2.0,
 	}
 
 	if err := c.connect(); err != nil {
@@ -71,16 +77,28 @@ func (rc *RabbitClient) connect() error {
 }
 
 func (rc *RabbitClient) handleReconnect() {
+	delay := rc.initialDelay
 	for {
 		if !rc.isConnected {
 			slog.Info("RabbitMQ connection lost, attempting to reconnect")
 
 			for !rc.isConnected {
 				if err := rc.connect(); err != nil {
-					slog.Error("Failed to reconnect to RabbitMQ", "error", err)
-					time.Sleep(rc.reconnectDelay)
+					slog.Error(
+						"Failed to reconnect to RabbitMQ",
+						"error",
+						err,
+						"backoff time",
+						delay,
+					)
+					time.Sleep(delay)
+					delay = time.Duration(float64(delay) * rc.backoffFactor)
+					if delay > rc.maxDelay {
+						delay = rc.maxDelay
+					}
 					continue
 				}
+				delay = rc.initialDelay
 				slog.Info("Reconnected to RabbitMQ")
 			}
 		}
@@ -91,33 +109,6 @@ func (rc *RabbitClient) handleReconnect() {
 		}
 	}
 }
-
-//// ConnectRabbitMQ will spawn a Connection
-//func ConnectRabbitMQ(username, password, host, vhost string) (*amqp.Connection, error) {
-//	// Setup the Connection to RabbitMQ host using AMQP
-//	conn, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s/%s", username, password, host, vhost))
-//	if err != nil {
-//		return nil, err
-//	}
-//	return conn, nil
-//}
-//
-//// NewRabbitMQClient will connect and return a Rabbitclient with an open connection
-//// Accepts a amqp Connection to be reused, to avoid spawning one TCP connection per concurrent client
-//func NewRabbitMQClient(conn *amqp.Connection) (RabbitClient, error) {
-//	// Unique, Conncurrent Server Channel to process/send messages
-//	// A good rule of thumb is to always REUSE Conn across applications
-//	// But spawn a new Channel per routine
-//	ch, err := conn.Channel()
-//	if err != nil {
-//		return RabbitClient{}, err
-//	}
-//
-//	return RabbitClient{
-//		conn: conn,
-//		ch:   ch,
-//	}, nil
-//}
 
 // Close will close the channel
 func (rc *RabbitClient) Close() error {
@@ -159,6 +150,16 @@ func (rc *RabbitClient) Send(
 	exchange, routingKey string,
 	options amqp.Publishing,
 ) error {
+	if !rc.isConnected {
+		slog.Error("not connected to rabbitmq")
+	}
+	if rc.ch == nil || rc.ch.IsClosed() {
+		ch, err := rc.conn.Channel()
+		if err != nil {
+			return fmt.Errorf("failed to open channel: %w", err)
+		}
+		rc.ch = ch
+	}
 	return rc.ch.PublishWithContext(ctx,
 		exchange,   // exchange
 		routingKey, // routing key
@@ -178,7 +179,10 @@ func (rc *RabbitClient) Send(
 // autoAck is important to understand, if set to true, it will automatically Acknowledge that processing is done
 // This is good, but remember that if the Process fails before completion, then an ACK is already sent, making a message lost
 // if not handled properly
-func (rc *RabbitClient) Consume(queue, consumer string, autoAck bool) (<-chan amqp.Delivery, error) {
+func (rc *RabbitClient) Consume(
+	queue, consumer string,
+	autoAck bool,
+) (<-chan amqp.Delivery, error) {
 	return rc.ch.Consume(queue, consumer, autoAck, false, false, false, nil)
 }
 

@@ -17,19 +17,22 @@ type Consume struct {
 }
 
 func initCustomersQueues(client *messaging.RabbitClient) error {
+	if err := client.CreateExchange("customer_events", "direct", true, false); err != nil {
+		slog.Error("error creating DLX exchange", "error", err)
+		return err
+	}
 	args := amqp.Table{
 		"x-dead-letter-exchange":    "retry_customer_events",
 		"x-dead-letter-routing-key": "retry_customer_events",
 	}
-	if err := client.CreateQueueWithArgs("customers_created", false, false, args); err != nil {
+	if err := client.CreateQueueWithArgs("customers_created", true,
+		false, args); err != nil {
 		slog.Error("error creating queue", "error", err, "queue", "customers_created")
 		return err
 	}
-	if err := client.CreateQueue("customers_test", false, false); err != nil {
-		slog.Error("error creating queue", "error", err, "queue", "customers_test")
-		return err
-	}
-	if err := client.CreateBinding("customers_created", "customers.created.*", "customer_events"); err != nil {
+	if err := client.CreateBinding("customers_created",
+		"customers.created.au", // direct muse match exactly
+		"customer_events"); err != nil {
 		slog.Error(
 			"error creating binding",
 			"error",
@@ -41,36 +44,24 @@ func initCustomersQueues(client *messaging.RabbitClient) error {
 		)
 		return err
 	}
-	// Create binding between the customer_events exchange and the customers-test queue
-	if err := client.CreateBinding("customers_test", "customers.*", "customer_events"); err != nil {
-		slog.Error(
-			"error creating binding",
-			"error",
-			err,
-			"binding",
-			"customers.*",
-			"exchange",
-			"customer_events",
-		)
-		return err
-	}
 	return nil
 }
 
 func initDeadLetter(client *messaging.RabbitClient) error {
 	// Create the dead letter exchange
-	if err := client.CreateExchange("retry_customer_events", "direct", false, false); err != nil {
+	if err := client.CreateExchange("retry_customer_events", "direct",
+		true, false); err != nil {
 		slog.Error("error creating DLX exchange", "error", err)
 		return err
 	}
 
 	// Create the dead letter queue
 	args := amqp.Table{
-		"x-dead-letter-exchange":    "retry_customer_events",
-		"x-dead-letter-routing-key": "retry_customer_events",
+		"x-dead-letter-exchange":    "customer_events",
+		"x-dead-letter-routing-key": "customer_events",
 		"x-message-ttl":             20000,
 	}
-	if err := client.CreateQueueWithArgs("retry_customer_events", false, false, args); err != nil {
+	if err := client.CreateQueueWithArgs("retry_customer_events", true, false, args); err != nil {
 		slog.Error("error creating DLQ", "error", err)
 		return err
 	}
@@ -102,12 +93,6 @@ func (c *Consume) Run() error {
 		return err
 	}
 	defer client.Close()
-	//client, err := messaging.NewRabbitMQClient(conn)
-	//if err != nil {
-	//	slog.Error("Failed to create to RabbitMQ client", "error", err, "type", "consumer")
-	//	return err
-	//}
-	//defer client.Close()
 
 	if err := initCustomersQueues(client); err != nil {
 		slog.Error("Failed to initialize queues", "error", err, "type", "consumer")
@@ -154,7 +139,15 @@ func (c *Consume) Run() error {
 					return err
 				}
 
-				logger.Info("Message processed successfully", "body", string(msg.Body), "type", msg.Type, "routingKey", msg.RoutingKey)
+				logger.Info(
+					"Message processed successfully",
+					"body",
+					string(msg.Body),
+					"type",
+					msg.Type,
+					"routingKey",
+					msg.RoutingKey,
+				)
 				if err := msg.Ack(false); err != nil {
 					logger.Error("Failed to ack message", "error", err)
 					return err
