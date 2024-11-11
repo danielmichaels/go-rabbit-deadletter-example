@@ -15,13 +15,20 @@ type Publish struct {
 }
 
 func (p *Publish) Run() error {
-	conn, err := messaging.ConnectRabbitMQ("guest", "guest", "localhost:5672", "/")
-	if err != nil {
-		slog.Error("Failed to connect to RabbitMQ", "error", err, "type", "publisher")
-		return err
+	//conn, err := messaging.ConnectRabbitMQ("guest", "guest", "localhost:5672", "/")
+	//if err != nil {
+	//	slog.Error("Failed to connect to RabbitMQ", "error", err, "type", "publisher")
+	//	return err
+	//}
+	//defer conn.Close()
+
+	ci := messaging.ConnectionInfo{
+		Username: "guest",
+		Password: "guest",
+		Host:     "localhost:5672",
+		VHost:    "/",
 	}
-	defer conn.Close()
-	client, err := messaging.NewRabbitMQClient(conn)
+	client, err := messaging.NewRabbitClient(ci)
 	if err != nil {
 		slog.Error("Failed to create to RabbitMQ client", "error", err, "type", "publisher")
 		return err

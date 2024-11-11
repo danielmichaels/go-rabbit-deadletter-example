@@ -16,7 +16,7 @@ type Consume struct {
 	Globals
 }
 
-func initCustomersQueues(client messaging.RabbitClient) error {
+func initCustomersQueues(client *messaging.RabbitClient) error {
 	args := amqp.Table{
 		"x-dead-letter-exchange":    "retry_customer_events",
 		"x-dead-letter-routing-key": "retry_customer_events",
@@ -57,7 +57,7 @@ func initCustomersQueues(client messaging.RabbitClient) error {
 	return nil
 }
 
-func initDeadLetter(client messaging.RabbitClient) error {
+func initDeadLetter(client *messaging.RabbitClient) error {
 	// Create the dead letter exchange
 	if err := client.CreateExchange("retry_customer_events", "direct", false, false); err != nil {
 		slog.Error("error creating DLX exchange", "error", err)
@@ -89,18 +89,25 @@ func (c *Consume) Run() error {
 	})
 	logger := slog.New(logHandler)
 
-	conn, err := messaging.ConnectRabbitMQ("guest", "guest", "localhost:5672", "/")
+	ci := messaging.ConnectionInfo{
+		Username: "guest",
+		Password: "guest",
+		Host:     "localhost:5672",
+		VHost:    "/",
+	}
+
+	client, err := messaging.NewRabbitClient(ci)
 	if err != nil {
 		logger.Error("Failed to connect to RabbitMQ", "error", err, "type", "consumer")
 		return err
 	}
-	defer conn.Close()
-	client, err := messaging.NewRabbitMQClient(conn)
-	if err != nil {
-		slog.Error("Failed to create to RabbitMQ client", "error", err, "type", "consumer")
-		return err
-	}
 	defer client.Close()
+	//client, err := messaging.NewRabbitMQClient(conn)
+	//if err != nil {
+	//	slog.Error("Failed to create to RabbitMQ client", "error", err, "type", "consumer")
+	//	return err
+	//}
+	//defer client.Close()
 
 	if err := initCustomersQueues(client); err != nil {
 		slog.Error("Failed to initialize queues", "error", err, "type", "consumer")
